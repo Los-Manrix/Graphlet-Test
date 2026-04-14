@@ -240,9 +240,11 @@ void search_motif(snode* node, int iter){
 				nexpansions++;
 				//printf("    See node %d\n", n->id);
 				if (n->parent == s->parent){
-					VRB_PRINT("Se resta 1 a [%d][%d][%d]\n",s->tpc,0,n->tpc);
+					int ta = s->tpc, tb = n->tpc;
+					if (ta > tb) { int tmp = ta; ta = tb; tb = tmp; }
+					VRB_PRINT("Se resta 1 a [%d][%d][%d]\n",ta,0,tb);
 					VRB_PRINT("Se agrega 1 a [%d][%d][%d]\n",s->tpc,cur->type,n->tpc);
-					type[s->tpc][0][n->tpc]--;
+					type[ta][0][tb]--;
 					type[s->tpc][cur->type][n->tpc]++;
 					//if (type[s->tpc][0][n->tpc] < 0)
 						DBG_PAUSE;
