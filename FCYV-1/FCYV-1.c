@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <time.h>
 
 #define MAX_NODES 50000
 #define MAX_QUEUE 50000
@@ -313,8 +314,12 @@ int main(int argc, char *argv[]) {
     }
 
     ReadGraph(argv[1]);
+
+    clock_t t_inicio = clock();
     search_motif_driver();
+    clock_t t_fin = clock();
 
     printf("nexpansions: %llu\n", nexpansions);
+    printf("Tiempo busqueda: %.6f segundos\n", (double)(t_fin - t_inicio) / CLOCKS_PER_SEC);
     return 0;
 }
