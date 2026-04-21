@@ -8,10 +8,14 @@
 
 3. **Ruta del grafo como argumento**: el archivo del grafo de entrada ya no está hardcodeado. Se pasa como argumento al ejecutar el programa.
 
+4. **FCVY-00** tiene un cambio en la estructura del grafo. En vez de usar una lista de adyancencia con nodos y punteros, se usa el formato de CSR que es 2 arrays donde uno tiene los nodos adyacentes y otro indica donde comienza la adyancencia del siguiente nodo. 
+
 ## Compilar
 
+Compilar siempre con Optimizacion 2 -O2 (igual 3 podria servir)
+
 ```bash
-gcc FCYV-1.c -o main.o
+gcc FCYV-1.c -O2 -o main.o
 ```
 
 ## Ejecutar
