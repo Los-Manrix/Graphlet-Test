@@ -28,10 +28,11 @@ Ejemplo:
 
 ```bash
 ./main.o ../../data/6nodos_procesado.txt
-```
 
 KAVOSH ./Kavosh -i networks/nombre.txt -s 3
-GTRIES ./gtrieScanner -s 3 -m esu -g networks/nombre.txt -d
-PROFE ./main ./networks/nombre.txt.txt 
 
+GTRIES ./gtrieScanner -s 3 -m esu -g networks/nombre.txt -d
+
+PROFE ./main ./networks/nombre.txt.txt 
+```
 
