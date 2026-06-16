@@ -52,10 +52,20 @@ src dst type
    `fscanf`, relevante en los grafos grandes.
 7. **Memoria dinámica.** Las estructuras se dimensionan a los `N` y `M` reales
    del grafo; no hay límites fijos de nodos ni de aristas.
+8. **Reetiquetado por grado.** Antes de procesar se ordenan los nodos por grado
+   no dirigido de mayor a menor (counting/bucket sort, `O(n+m)`), asignando los
+   ids más chicos a los nodos de mayor grado. El costo dominante de FCYV es
+   `Σ_s (#in-vecinos de s con id menor) · outdeg(s)`; al dar id chico a los
+   nodos de alto grado, estos se procesan primero como hub y quedan excluidos
+   del resto (`n <= hub`), evitando pagar su `outdeg` enorme como sucesores.
+   Reduce las expansiones ~10–70× en grafos sesgados. El census es invariante
+   al reetiquetado (cuenta motivos por tipo de arista, no por id).
 
 ## Salida
 
 - Tabla completa `[i][j][k] : conteo` para los tipos 0–3.
 - `Total subgrafos`: total de motivos conexos contados.
 - `nexpansions`: número de expansiones realizadas (métrica de trabajo).
-- `Tiempo busqueda`: tiempo de cómputo en segundos.
+- `Tiempo reorden`: tiempo del reetiquetado por grado.
+- `Tiempo busqueda`: tiempo del cómputo del census.
+- `Tiempo total`: reorden + búsqueda.
