@@ -1,0 +1,15 @@
+# Ignorar la carpeta de grafos FormatoP por completo
+FormatoP/
+
+# Ignorar binarios compilados y archivos objeto
+*cpp
+*_bin
+*.o
+*.exe
+*.out
+main.o
+
+# Carpetas temporales y configuraciones de editor
+.vscode/
+.idea/
+.DS_Store
