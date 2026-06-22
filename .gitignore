@@ -1,8 +1,9 @@
 # Ignorar la carpeta de grafos FormatoP por completo
 FormatoP/
 
-# Ignorar binarios compilados y archivos objeto
+# Ignorar binarios compilados (evitando ignorar los archivos fuente .cpp)
 *cpp
+!*.cpp
 *_bin
 *.o
 *.exe
