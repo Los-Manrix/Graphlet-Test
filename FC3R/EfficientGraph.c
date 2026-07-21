@@ -33,25 +33,25 @@ struct toSort //nodes
   unsigned grade; 
 };
 
-// Función de comparación segura para tipos unsigned (Mayor a Menor)
+// Funciï¿½n de comparaciï¿½n segura para tipos unsigned (Mayor a Menor)
 int compararPorGradeDescendente(const void *a, const void *b) {
-    // 1. Convertir los punteros genéricos al tipo de tu estructura
+    // 1. Convertir los punteros genï¿½ricos al tipo de tu estructura
     const struct toSort *nodoA = (const struct toSort *)a;
     const struct toSort *nodoB = (const struct toSort *)b;
 
-    // 2. Lógica para orden descendente (Mayor a Menor)
-    if (nodoA->grade < nodoB->grade) return 1;  // Si A es menor, va después
+    // 2. Lï¿½gica para orden descendente (Mayor a Menor)
+    if (nodoA->grade < nodoB->grade) return 1;  // Si A es menor, va despuï¿½s
     if (nodoA->grade > nodoB->grade) return -1; // Si A es mayor, va antes
     return 0;                                   // Si son iguales, se quedan igual
 }
 
 int compararPorGradeAscendente(const void *a, const void *b) {
-    // 1. Convertir los punteros genéricos al tipo de tu estructura
+    // 1. Convertir los punteros genï¿½ricos al tipo de tu estructura
     const struct toSort *nodoA = (const struct toSort *)a;
     const struct toSort *nodoB = (const struct toSort *)b;
 
-    // 2. Lógica para orden descendente (Mayor a Menor)
-    if (nodoA->grade > nodoB->grade) return 1;  // Si A es menor, va después
+    // 2. Lï¿½gica para orden descendente (Mayor a Menor)
+    if (nodoA->grade > nodoB->grade) return 1;  // Si A es menor, va despuï¿½s
     if (nodoA->grade < nodoB->grade) return -1; // Si A es mayor, va antes
     return 0;                                   // Si son iguales, se quedan igual
 }
@@ -252,14 +252,18 @@ void SearchGraphletsDriver(){
 	
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     int i,e;
 
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <archivo_grafo>\n", argv[0]);
+        return 1;
+    }
 
     // Build the graph using array indexes
     initialize_type();
 
-	ReadGraph("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
+	ReadGraph(argv[1]);
 
     time_t inicio = time(NULL);
     qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeDescendente);
