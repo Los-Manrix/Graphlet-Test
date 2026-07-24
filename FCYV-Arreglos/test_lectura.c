@@ -2,23 +2,39 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #define MAX_VERTICES 50000
 #define MAX_ARISTAS  14000000
 
-// --- STRUCT DE ARREGLOS (REPRESENTACIÓN DEL GRAFO) ---
+// --- STRUCT DE ARREGLOS EN FORMATO CSR ---
 struct Grafo {
-    int cabeza[MAX_VERTICES];       // Guarda el índice de la primera arista de cada nodo
+    int cabeza[MAX_VERTICES + 1];   // Puntos de inicio de los vecinos de cada nodo en el arreglo
     int grado[MAX_VERTICES];        // Guarda el número de vecinos salientes de cada nodo
-    int destino[MAX_ARISTAS];       // Guarda el nodo de destino de cada arista
-    int siguiente[MAX_ARISTAS];     // Guarda el índice de la siguiente arista del mismo nodo
-    int tipo[MAX_ARISTAS];          // Guarda el tipo de la arista (1, 2 o 3)
+    int destino[MAX_ARISTAS];       // Vecinos contiguos en memoria
+    int tipo[MAX_ARISTAS];          // Tipos de aristas contiguos en memoria
 };
 
-struct Grafo g; // Instancia única global del grafo
+struct Grafo g; // Instancia única global del grafo CSR
 
 int numVertices = 0;
 int numAristas = 0;
+
+// Arreglos auxiliares globales para la carga de datos y re-indexado por qsort()
+int grado_original[MAX_VERTICES];
+int order[MAX_VERTICES];
+int nuevo_id[MAX_VERTICES];
+int pos_actual[MAX_VERTICES];
+
+// Struct auxiliar para ordenar las listas de adyacencia de cada nodo de forma descendente
+struct AristaAux {
+    int destino;
+    int tipo;
+};
+struct AristaAux aux_sort[50000];
 
 // --- VARIABLES GLOBALES DE BÚSQUEDA ---
 unsigned long long int nexpansions = 0;
@@ -42,80 +58,148 @@ int queue_pop() { return queue[rear++]; }
 short color[MAX_VERTICES];
 unsigned iter[MAX_VERTICES];
 short tpc[MAX_VERTICES];
-int order[MAX_VERTICES]; // Orden de visita de los nodos
-int order_pos[MAX_VERTICES]; // Posición de visita de cada nodo (para optimizar n > hub)
 
-// Inicializa los arreglos con valores por defecto
-void inicializarGrafo(int vertices) {
-    numVertices = vertices;
-    numAristas = 0;
-    
-    for (int i = 0; i < vertices; i++) {
-        g.cabeza[i] = -1; // -1 significa que el nodo no tiene aristas asignadas aún
-        g.grado[i] = 0;   // El grado inicial de todo nodo es cero
-    }
+// Comparador para qsort: ordena de forma descendente según grado_original
+int compararNodos(const void* a, const void* b) {
+    int nodoA = *(const int*)a;
+    int nodoB = *(const int*)b;
+    return grado_original[nodoB] - grado_original[nodoA];
 }
 
-// Agrega una arista dirigida u -> v con tipo t
-void agregarAristaDirigida(int u, int v, int t) {
-    if (numAristas >= MAX_ARISTAS) {
-        fprintf(stderr, "Error: Se excedió la capacidad máxima de aristas (%d)\n", MAX_ARISTAS);
-        exit(1);
-    }
-    
-    int ID_arista = numAristas; // Tomamos el índice libre actual
-    
-    g.destino[ID_arista] = v;
-    g.tipo[ID_arista] = t;              // Guardamos el tipo de conexión (1, 2 o 3)
-    g.siguiente[ID_arista] = g.cabeza[u]; // Apunta al índice de la que antes era la primera arista
-    g.cabeza[u] = ID_arista;            // Colocamos esta nueva arista al frente de la lista
-    
-    g.grado[u] = g.grado[u] + 1;          // Incrementamos el grado del nodo origen
-    numAristas = numAristas + 1;      // Pasamos al siguiente espacio disponible
+// Comparador para ordenar vecinos de forma descendente por ID de destino
+int compararAristasAux(const void* a, const void* b) {
+    const struct AristaAux* edgeA = (const struct AristaAux*)a;
+    const struct AristaAux* edgeB = (const struct AristaAux*)b;
+    return edgeB->destino - edgeA->destino;
 }
 
-// Lee el archivo del grafo (Formato P, 1-based)
+// Parser de enteros rápido: misma lógica que FCYV-2, sin overhead de fscanf.
+// Avanza el puntero p saltando no-dígitos, luego lee dígitos.
+static inline int parse_int(const char **p, const char *end) {
+    while (*p < end && (**p < '0' || **p > '9')) (*p)++;
+    int x = 0;
+    while (*p < end && **p >= '0' && **p <= '9') {
+        x = x * 10 + (**p - '0');
+        (*p)++;
+    }
+    return x;
+}
+
+// -----------------------------------------------------------------------
+// PASADA 1 + 2: mmap + parser manual (igual que FCYV-2).
+// I/O + re-indexado por grado. El sort de vecinos queda
+// para reorder_by_degree() (que se cronometra por separado).
+// -----------------------------------------------------------------------
 void ReadGraph(const char* filename) {
-    FILE* f = fopen(filename, "r");
-    if (f == NULL) {
-        printf("Error: No se pudo abrir el archivo %s.\n", filename);
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "Error: No se pudo abrir el archivo %s.\n", filename);
         exit(1);
     }
 
-    int file_vertices, file_aristas;
-    if (fscanf(f, "%d %d\n", &file_vertices, &file_aristas) != 2) {
-        fprintf(stderr, "Error: Formato de encabezado inválido.\n");
-        fclose(f);
-        exit(1);
-    }
+    struct stat st;
+    fstat(fd, &st);
+    size_t fsize = (size_t)st.st_size;
+
+    // Mapear el archivo completo en memoria del SO en una sola syscall
+    char *base = (char *)mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (base == MAP_FAILED) { perror("mmap"); exit(1); }
+    madvise(base, fsize, MADV_SEQUENTIAL); // Avisa al OS que leeremos en orden
+    close(fd);
+
+    const char *p   = base;
+    const char *end = base + fsize;
+
+    int file_vertices = parse_int(&p, end);
+    int file_aristas  = parse_int(&p, end);
 
     if (file_vertices > MAX_VERTICES) {
         fprintf(stderr, "Error: El grafo excede el límite máximo de vértices (%d)\n", MAX_VERTICES);
-        fclose(f);
+        munmap(base, fsize);
         exit(1);
     }
 
-    inicializarGrafo(file_vertices);
+    numVertices = file_vertices;
 
-    int ori, dest, t;
-    for (int i = 0; i < file_aristas; i++) {
-        if (fscanf(f, "%d %d %d\n", &ori, &dest, &t) != 3) {
-            break;
-        }
-        
-        // Ajustamos la base 1 del archivo a la base 0 del lenguaje C (-1)
-        int u = ori - 1;
-        int v = dest - 1;
-        
-        if (u == v) continue; // Evitamos self-loops (lazos al mismo nodo)
-        
-        agregarAristaDirigida(u, v, t);
+    // Inicializar grados en cero
+    for (int i = 0; i < numVertices; i++) {
+        grado_original[i] = 0;
+        order[i] = i;
     }
-    fclose(f);
+
+    // Guardar posición justo después del encabezado para la PASADA 2
+    const char *data_start = p;
+
+    // PASADA 1: Contar grado de salida de cada nodo
+    for (int i = 0; i < file_aristas && p < end; i++) {
+        int u = parse_int(&p, end) - 1;
+        int v = parse_int(&p, end) - 1;
+        parse_int(&p, end); // consumir tipo (no necesario en pasada 1)
+        if (u == v) continue;
+        grado_original[u]++;
+    }
+
+    // Ordenar nodos por grado descendente y crear mapeo ID original -> nuevo ID
+    qsort(order, numVertices, sizeof(int), compararNodos);
+    for (int i = 0; i < numVertices; i++) {
+        nuevo_id[order[i]] = i;
+    }
+
+    // Construir offsets del CSR en el nuevo orden
+    g.cabeza[0] = 0;
+    for (int i = 0; i < numVertices; i++) {
+        int orig = order[i];
+        g.grado[i]    = grado_original[orig];
+        g.cabeza[i+1] = g.cabeza[i] + g.grado[i];
+        pos_actual[i] = g.cabeza[i];
+    }
+
+    // PASADA 2: Re-leer aristas con los nuevos IDs (desde el puntero guardado)
+    p = data_start;
+    numAristas = 0;
+    for (int i = 0; i < file_aristas && p < end; i++) {
+        int u = parse_int(&p, end) - 1;
+        int v = parse_int(&p, end) - 1;
+        int t = parse_int(&p, end);
+        if (u == v) continue;
+
+        int u_new = nuevo_id[u];
+        int v_new = nuevo_id[v];
+        int idx = pos_actual[u_new]++;
+        g.destino[idx] = v_new;
+        g.tipo[idx]    = t;
+        numAristas++;
+    }
+
+    munmap(base, fsize);
+}
+
+
+
+// -----------------------------------------------------------------------
+// REORDEN: Ordena los vecinos de cada nodo en forma descendente.
+// Esto habilita la poda temprana (early break) en search_motif.
+// Se cronometra por separado, igual que en FCYV-2.
+// -----------------------------------------------------------------------
+void reorder_by_degree() {
+    for (int i = 0; i < numVertices; i++) {
+        int start = g.cabeza[i];
+        int len   = g.grado[i];
+        if (len < 2) continue;
+
+        for (int k = 0; k < len; k++) {
+            aux_sort[k].destino = g.destino[start + k];
+            aux_sort[k].tipo    = g.tipo[start + k];
+        }
+        qsort(aux_sort, len, sizeof(struct AristaAux), compararAristasAux);
+        for (int k = 0; k < len; k++) {
+            g.destino[start + k] = aux_sort[k].destino;
+            g.tipo[start + k]    = aux_sort[k].tipo;
+        }
+    }
 }
 
 // Muestra el grafo leído por pantalla de forma limpia
-/*
 void mostrarGrafo() {
     int max_print = (numVertices > 20) ? 10 : numVertices;
     printf("\n--- Estructura del Grafo (mostrando primeros %d vértices de %d) ---\n", max_print, numVertices);
@@ -123,10 +207,10 @@ void mostrarGrafo() {
     for (int i = 0; i < max_print; i++) {
         printf("Vértice %d (Grado: %d) -> Vecinos: [", i, g.grado[i]);
         
-        int e = g.cabeza[i];
-        while (e != -1) {
+        int start = g.cabeza[i];
+        int end = g.cabeza[i + 1];
+        for (int e = start; e < end; e++) {
             printf(" %d(tipo:%d)", g.destino[e], g.tipo[e]);
-            e = g.siguiente[e];
         }
         printf(" ]\n");
     }
@@ -138,7 +222,6 @@ void mostrarGrafo() {
 
 // --- FUNCIONES AUXILIARES PARA EL CENSO DE MOTIVOS ---
 
-*/
 void print_types() {
     long long total = 0;
     printf("\n--- Resultados del Censo de Motivos ---\n");
@@ -165,21 +248,19 @@ void search_motif(int hub, int iter_val) {
     int n1 = 0, n2 = 0, n3 = 0;
     color[hub] = 1; // 1 significa red (visitado)
 
-    int hub_pos = order_pos[hub];
+    // 1. Contar vecinos del hub con n > hub
+    int start = g.cabeza[hub];
+    int end = g.cabeza[hub + 1];
+    for (int i = start; i < end; i++) {
+        int n = g.destino[i];
+        if (n <= hub) break; // PODA TEMPRANA: Al estar ordenado descendente, todos los siguientes serán <= hub!
 
-    // 1. Contar vecinos del hub con order_pos[n] > order_pos[hub]
-    int e = g.cabeza[hub];
-    while (e != -1) {
-        int n = g.destino[e];
-        if (order_pos[n] > hub_pos) {
-            nexpansions++;
-            tpc[n] = g.tipo[e];
-            if (tpc[n] == 1) n1++;
-            if (tpc[n] == 2) n2++;
-            if (tpc[n] == 3) n3++;
-            queue_insert(n); // Llama internamente a in_queue[n] = 1
-        }
-        e = g.siguiente[e];
+        nexpansions++;
+        tpc[n] = g.tipo[i];
+        if (tpc[n] == 1) n1++;
+        if (tpc[n] == 2) n2++;
+        if (tpc[n] == 3) n3++;
+        queue_insert(n); // Llama internamente a in_queue[n] = 1
     }
 
     // Combinatoria cerrada simplificada para los abanicos (fans)
@@ -195,22 +276,24 @@ void search_motif(int hub, int iter_val) {
         int s = queue_pop();
         iter[s] = iter_val;
 
-        int e_s = g.cabeza[s];
-        while (e_s != -1) {
-            int n = g.destino[e_s];
-            if (order_pos[n] > hub_pos && iter[n] != iter_val) {
+        int s_start = g.cabeza[s];
+        int s_end = g.cabeza[s + 1];
+        for (int i = s_start; i < s_end; i++) {
+            int n = g.destino[i];
+            if (n <= hub) break; // PODA TEMPRANA: Al estar ordenado descendente, todos los siguientes serán <= hub!
+
+            if (iter[n] != iter_val) {
                 nexpansions++;
                 if (in_queue[n]) { // Triángulo hub--s--n (está en la cola)
                     int ta = tpc[s];
                     int tb = tpc[n];
                     if (ta > tb) { int tmp = ta; ta = tb; tb = tmp; }
                     type[ta][0][tb]--;
-                    type[tpc[s]][g.tipo[e_s]][tpc[n]]++;
+                    type[tpc[s]][g.tipo[i]][tpc[n]]++;
                 } else { // Camino abierto hub->s->n
-                    type[tpc[s]][g.tipo[e_s]][0]++;
+                    type[tpc[s]][g.tipo[i]][0]++;
                 }
             }
-            e_s = g.siguiente[e_s];
         }
     }
 
@@ -221,72 +304,30 @@ void search_motif(int hub, int iter_val) {
     clear_queue();
 }
 
-// Funciones auxiliares para QuickSort (orden descendente según grado)
-void swap(int* a, int* b) {
-    int t = *a;
-    *a = *b;
-    *b = t;
-}
-
-int partition(int arr[], int low, int high) {
-    int pivot = g.grado[arr[high]];
-    int i = (low - 1);
-    
-    for (int j = low; j <= high - 1; j++) {
-        if (g.grado[arr[j]] > pivot) {
-            i++;
-            swap(&arr[i], &arr[j]);
-        }
-    }
-    swap(&arr[i + 1], &arr[high]);
-    return (i + 1);
-}
-
-void quickSort(int arr[], int low, int high) {
-    if (low < high) {
-        int pi = partition(arr, low, high);
-        quickSort(arr, low, pi - 1);
-        quickSort(arr, pi + 1, high);
-    }
-}
-
-void iniciar_types(){
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            for (int k = 0; k < 4; k++) {
-                type[i][j][k] = 0;
-            }
-        }
-    }
-}
-
 void search_motif_driver() {
-    iniciar_types();
+    memset(type, 0, sizeof(type));
     nexpansions = 0;
     
-    // Inicializar estado de los nodos y el arreglo de orden de visita
+    // Inicializar estado de los nodos
     for (int i = 0; i < numVertices; i++) {
         color[i] = 0;
         iter[i] = 0;
         in_queue[i] = 0;
         tpc[i] = 0;
-        order[i] = i;
     }
 
-    // Ordenar nodos por grado descendente usando QuickSort
-    quickSort(order, 0, numVertices - 1);
-
-    // Poblar el mapeo de posiciones ordenadas de visita (order_pos)
-    for (int i = 0; i < numVertices; i++) {
-        order_pos[order[i]] = i;
-    }
-
+    // Como los nodos se renombraron físicamente en la carga de mayor a menor grado,
+    // el orden de visita como hub es simplemente la secuencia ordenada de enteros 0..V-1.
     int iter_val = 1;
     for (int i = 0; i < numVertices; i++) {
-        int target_node = order[i];
-        search_motif(target_node, iter_val);
+        search_motif(i, iter_val);
         iter_val++;
     }
+}
+
+// Helper: diferencia entre dos timespec en segundos (igual que FCYV-2)
+static double elapsed(struct timespec a, struct timespec b) {
+    return (b.tv_sec - a.tv_sec) + (b.tv_nsec - a.tv_nsec) * 1e-9;
 }
 
 int main(int argc, char** argv) {
@@ -294,25 +335,27 @@ int main(int argc, char** argv) {
         printf("Uso: %s <archivo_grafo>\n", argv[0]);
         return 1;
     }
-    
+
     const char* filename = argv[1];
-    
+
     printf("Leyendo el grafo desde: %s ...\n", filename);
     ReadGraph(filename);
-    
-    printf("Lectura completada. Vértices leídos: %d, Aristas válidas añadidas: %d\n", numVertices, numAristas);
-    
-    //mostrarGrafo();
-    
-    // Censo de Motivos de 3 Nodos
-    printf("\nEjecutando censo de motivos conexos de 3 nodos...\n");
-    clock_t t_inicio = clock();
+    printf("Lectura completada. Vértices leídos: %d, Aristas válidas añadidas: %d\n",
+           numVertices, numAristas);
+
+    // Cronometrar reorden + búsqueda por separado, igual que FCYV-2
+    struct timespec t0, t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    reorder_by_degree();
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     search_motif_driver();
-    clock_t t_fin = clock();
-    
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+
     print_types();
     printf("nexpansions: %llu\n", nexpansions);
-    printf("Tiempo busqueda: %.6f segundos\n", (double)(t_fin - t_inicio) / CLOCKS_PER_SEC);
-    
+    printf("Tiempo reorden : %.6f segundos\n", elapsed(t0, t1));
+    printf("Tiempo busqueda: %.6f segundos\n", elapsed(t1, t2));
+    printf("Tiempo total   : %.6f segundos\n", elapsed(t0, t2));
+
     return 0;
 }
