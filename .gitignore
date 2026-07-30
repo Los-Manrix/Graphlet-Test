@@ -1,0 +1,4 @@
+.atl/
+*.md
+!README.md
+!resultados*.md
