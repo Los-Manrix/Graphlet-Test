@@ -59,7 +59,7 @@ static const char *TRI_NAME[17] = {
 };
 
 /*
- * classify_motif() de la Linea 8.
+ * Clasificacion de la Linea 8, primera mitad: del codigo de 6 bits al tipo.
  *
  * El Apendice J del paper define la clasificacion asi: se toma la submatriz
  * 3x3 de A sobre (i,j,k), se le saca la diagonal y se aplica 1{. > 0}, lo que
@@ -87,6 +87,49 @@ static const int CODE_TRIAD[64] = {
     T021D,T030T,T111U,T120U,T030T,T120D,T120C,T210,
     T111U,T120C,T201, T210, T120U,T210, T210, T300
 };
+
+/*
+ * Motivo ETIQUETADO: ademas del tipo, cual de los tres nodos ocupa cada
+ * posicion estructural. Es lo que la implementacion de referencia guarda en D
+ * (`map_code_to_key()` en src/dtc.py), y lo que habilita el analisis de
+ * brokerage: no alcanza con saber que hay un 021D, hay que saber quien es el
+ * broker. La columna `motif` de LabeledMotifTruthTables.csv trae "021D-ikj",
+ * o sea tipo mas permutacion; esta tabla es la permutacion, reindexada a la
+ * codificacion de bits que usa este archivo.
+ *   0 = ijk   1 = ikj   2 = jik   3 = jki   4 = kij   5 = kji
+ */
+static const unsigned char CODE_PERM[64] = {
+    0, 0, 1, 2, 2, 0, 2, 3,
+    3, 0, 1, 1, 0, 1, 3, 1,
+    4, 4, 1, 5, 2, 3, 5, 0,
+    3, 0, 0, 0, 2, 3, 0, 3,
+    5, 0, 1, 0, 5, 1, 2, 1,
+    3, 4, 2, 2, 4, 2, 2, 1,
+    1, 5, 0, 0, 4, 1, 5, 5,
+    2, 4, 4, 0, 2, 4, 2, 0,
+};
+
+/* Motivo mas los tres nodos en orden de motivo. Equivale a la cadena
+ * "021D_3-7-5" que arma la referencia. */
+struct Labeled {
+    int motif;
+    int n[3];
+};
+
+static inline Labeled make_labeled(int code, int i, int j, int k)
+{
+    Labeled L;
+    L.motif = CODE_TRIAD[code];
+    switch (CODE_PERM[code]) {
+        case 0: L.n[0]=i; L.n[1]=j; L.n[2]=k; break;
+        case 1: L.n[0]=i; L.n[1]=k; L.n[2]=j; break;
+        case 2: L.n[0]=j; L.n[1]=i; L.n[2]=k; break;
+        case 3: L.n[0]=j; L.n[1]=k; L.n[2]=i; break;
+        case 4: L.n[0]=k; L.n[1]=i; L.n[2]=j; break;
+        default:L.n[0]=k; L.n[1]=j; L.n[2]=i; break;
+    }
+    return L;
+}
 
 /* --------------------------------------------------------- clave de triada */
 
@@ -156,11 +199,11 @@ struct DTC {
     long long C[17];
 
     /* D_t: hashmap de triadas CONEXAS -> motivo actual. */
-    unordered_map<TriadKey, int, TriadHash> D;
+    unordered_map<TriadKey, Labeled, TriadHash> D;
     bool use_dict = true;
 
     /* L: ledger de transiciones (t, i, j, k, motivo previo, motivo nuevo). */
-    struct Entry { int t, i, j, k, prev, next; };
+    struct Entry { int t, i, j, k; Labeled prev, next; };
     vector<Entry> L;
     bool keep_ledger = false;
 
@@ -194,19 +237,6 @@ struct DTC {
     }
 
     inline bool arc(int i, int j) const { return weight(i, j) > 0; }
-
-    /* Linea 8: classify_motif(i, j, k, A_t) */
-    inline int classify_motif(int i, int j, int k) const
-    {
-        int code = 0;
-        if (arc(i, j)) code |= 1;
-        if (arc(i, k)) code |= 2;
-        if (arc(j, i)) code |= 4;
-        if (arc(j, k)) code |= 8;
-        if (arc(k, i)) code |= 16;
-        if (arc(k, j)) code |= 32;
-        return CODE_TRIAD[code];
-    }
 
     /* =====================================================================
      * Algorithm 1: update_census()
@@ -280,28 +310,31 @@ struct DTC {
 
             const TriadKey key3 = canonical(i, j, k);
 
+            const int code_now = classify_code(i, j, k);
+
             /* --- Linea 7: prev_motif <- D['ijk'] ------------------------ */
-            int prev_motif = MOTIF_NULL;
+            Labeled prev{MOTIF_NULL, {0, 0, 0}};
             if (use_dict) {
                 auto it = D.find(key3);
-                if (it != D.end()) prev_motif = it->second;
+                if (it != D.end()) prev = it->second;
             } else {
                 /* Sin diccionario: el motivo previo se deriva en O(1) del
                  * actual, porque el unico bit que cambio es l(i,j), que es el
-                 * bit 0 de la codificacion. Da exactamente lo mismo que leer D
-                 * (ver README, "Observacion"), pero no guarda la pertenencia
-                 * por triada, que es un entregable del paper. */
-                const int code_now = classify_code(i, j, k);
+                 * bit 0 de la codificacion. Da exactamente el mismo censo que
+                 * leer D (ver README, "Observacion"), pero no conserva la
+                 * pertenencia por triada, que es un entregable del paper. */
                 const int code_before = (code_now & ~1) | (tie_before ? 1 : 0);
                 /* Solo cuenta como "estaba en D" si la triada era conexa. */
-                prev_motif = conn_before ? CODE_TRIAD[code_before] : MOTIF_NULL;
+                if (conn_before) prev = make_labeled(code_before, i, j, k);
             }
+            const int prev_motif = prev.motif;
 
             /* --- Linea 8 ------------------------------------------------ */
-            const int new_motif = classify_motif(i, j, k);
+            const Labeled next = make_labeled(code_now, i, j, k);
+            const int new_motif = next.motif;
 
             /* --- Linea 9 ------------------------------------------------ */
-            if (keep_ledger) L.push_back(Entry{t, i, j, k, prev_motif, new_motif});
+            if (keep_ledger) L.push_back(Entry{t, i, j, k, prev, next});
 
             /* --- Lineas 10-19 ------------------------------------------- */
             if (prev_motif != MOTIF_NULL) {
@@ -327,7 +360,7 @@ struct DTC {
              * conexa (que es justo la rama else). Y en disolucion puede dejar
              * de ser conexa, en cuyo caso sale de D. Ver README, "Erratas". */
             if (use_dict) {
-                if (conn_now) D[key3] = new_motif;
+                if (conn_now) D[key3] = next;
                 else          D.erase(key3);
             }
         }
@@ -347,7 +380,8 @@ struct DTC {
         /* Linea 30: (A, C, D, L quedan actualizados in situ) */
     }
 
-    /* Igual que classify_motif pero devolviendo el codigo crudo de 6 bits. */
+    /* Linea 8: los 6 bits de la submatriz 3x3 sobre (i,j,k). Con
+     * CODE_TRIAD/CODE_PERM dan el motivo etiquetado (Apendice J). */
     inline int classify_code(int i, int j, int k) const
     {
         int code = 0;
@@ -428,6 +462,8 @@ int main(int argc, char **argv)
                 "                   pero se pierde la pertenencia por triada. Necesario\n"
                 "                   en los grafos grandes, donde D no entra en memoria.\n"
                 "  --ledger ARCH    volcar el ledger L de transiciones.\n"
+                "  --volcar-D ARCH  volcar el hashmap D de triadas conexas, con el\n"
+                "                   motivo etiquetado de cada una.\n"
                 "  --disolver       despues de formar todo, disolver todo en orden\n"
                 "                   inverso y verificar que el censo vuelve al caso base.\n"
                 "  --disolver-parcial SEED SALIDA\n"
@@ -442,10 +478,12 @@ int main(int argc, char **argv)
     const char *ledger_path = NULL;
     int parcial_seed = -1;
     const char *parcial_out = NULL;
+    const char *volcar_D = NULL;
     for (int a = 2; a < argc; a++) {
         if (!strcmp(argv[a], "--no-dict")) no_dict = true;
         else if (!strcmp(argv[a], "--disolver")) disolver = true;
         else if (!strcmp(argv[a], "--ledger") && a + 1 < argc) ledger_path = argv[++a];
+        else if (!strcmp(argv[a], "--volcar-D") && a + 1 < argc) volcar_D = argv[++a];
         else if (!strcmp(argv[a], "--disolver-parcial") && a + 2 < argc) {
             parcial_seed = atoi(argv[++a]);
             parcial_out = argv[++a];
@@ -519,13 +557,35 @@ int main(int argc, char **argv)
     printf("Connected thirds visitados: %llu\n", dtc.n_connected_thirds);
     if (dtc.use_dict) printf("Triadas conexas en D      : %zu\n", dtc.D.size());
 
+    if (volcar_D) {
+        FILE *out = fopen(volcar_D, "w");
+        if (!out) { fprintf(stderr, "No se puede escribir %s\n", volcar_D); return 1; }
+        /* "a b c  motivo n1 n2 n3": la clave canonica y el motivo etiquetado.
+         * Nodos en base 0, como los ids internos de la implementacion de
+         * referencia, para poder comparar los dos volcados directamente. */
+        for (const auto &kv : dtc.D)
+            fprintf(out, "%d %d %d %s %d %d %d\n",
+                    kv.first.a, kv.first.b, kv.first.c, TRI_NAME[kv.second.motif],
+                    kv.second.n[0], kv.second.n[1], kv.second.n[2]);
+        fclose(out);
+        printf("D volcado     : %zu triadas -> %s\n", dtc.D.size(), volcar_D);
+    }
+
     if (ledger_path) {
         FILE *out = fopen(ledger_path, "w");
         if (!out) { fprintf(stderr, "No se puede escribir %s\n", ledger_path); return 1; }
-        fprintf(out, "# t i j k motivo_previo motivo_nuevo  (nodos en base 1)\n");
-        for (const DTC::Entry &e : dtc.L)
-            fprintf(out, "%d %d %d %d %s %s\n", e.t, e.i + 1, e.j + 1, e.k + 1,
-                    e.prev == MOTIF_NULL ? "NULL" : TRI_NAME[e.prev], TRI_NAME[e.next]);
+        fprintf(out, "# t triada motivo_previo motivo_nuevo  (nodos en base 1,\n"
+                    "# motivo etiquetado: tipo_n1-n2-n3 en orden de motivo)\n");
+        for (const DTC::Entry &e : dtc.L) {
+            char antes[64], despues[64];
+            if (e.prev.motif == MOTIF_NULL) snprintf(antes, sizeof(antes), "disconn");
+            else snprintf(antes, sizeof(antes), "%s_%d-%d-%d", TRI_NAME[e.prev.motif],
+                          e.prev.n[0] + 1, e.prev.n[1] + 1, e.prev.n[2] + 1);
+            snprintf(despues, sizeof(despues), "%s_%d-%d-%d", TRI_NAME[e.next.motif],
+                     e.next.n[0] + 1, e.next.n[1] + 1, e.next.n[2] + 1);
+            fprintf(out, "%d %d-%d-%d %s %s\n", e.t,
+                    e.i + 1, e.j + 1, e.k + 1, antes, despues);
+        }
         fclose(out);
         printf("Ledger        : %zu transiciones -> %s\n", dtc.L.size(), ledger_path);
     }

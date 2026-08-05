@@ -28,18 +28,20 @@ distintos.
 | 2-4 (arco redundante) | chequeo de existencia, ver "Desviaciones" |
 | 5 (`these_k`) | unión de vecindarios con marcas de época |
 | 6-21 (connected thirds) | bucle principal |
-| 7-8 (`prev_motif`, `new_motif`) | consulta a `D` y `classify_motif()` |
+| 7-8 (`prev_motif`, `new_motif`) | consulta a `D` y `classify_code()` + `make_labeled()` |
 | 9 (ledger) | `L.push_back(...)`, activable con `--ledger` |
 | 10-19 (alta/baja de conteos) | ver "Erratas" |
 | 20 (`C[new_motif] += 1`) | igual |
 | 22-29 (disconnected thirds) | corrección aritmética en O(1) |
 
-`classify_motif()` (Línea 8) implementa el Apéndice J: submatriz 3×3 sobre `(i,j,k)`, se le
-saca la diagonal, se aplica `1{·>0}` y queda una cadena binaria de 6 bits; una biyección
-manda esas 64 cadenas a los 16 motivos. La tabla `CODE_TRIAD[64]` **es** esa biyección
-materializada. Se reusa la de `Ortmann/ortmann-00.cpp` porque ya está validada contra fuerza
-bruta en este repo, y usar la misma hace que los dos censos sean comparables entrada por
-entrada.
+La Línea 8 implementa el Apéndice J: `classify_code()` arma la submatriz 3×3 sobre
+`(i,j,k)`, le saca la diagonal, aplica `1{·>0}` y devuelve la cadena binaria de 6 bits;
+`make_labeled()` la manda al motivo. `CODE_TRIAD[64]` da el tipo y `CODE_PERM[64]` da qué
+nodo ocupa cada posición estructural, o sea el motivo **etiquetado** que la referencia guarda
+en `D`. `CODE_TRIAD` es la de `Ortmann/ortmann-00.cpp` (ya validada contra fuerza bruta en
+este repo, y usar la misma hace comparables los dos censos entrada por entrada);
+`CODE_PERM` se generó desde `LabeledMotifTruthTables.csv` del repo del autor. Las dos tablas
+se verificaron equivalentes a la suya en las 64 combinaciones.
 
 ## Erratas del pseudocódigo publicado
 
@@ -57,13 +59,86 @@ pasa de desconectada a conexa, o sea el caso en que hay que darla de alta en `D`
 está publicado, esas tríadas nunca entrarían al diccionario y el siguiente evento que las
 tocara volvería a tratarlas como desconectadas.
 
+## Comparación con la implementación de referencia
+
+El autor publicó su código en <https://github.com/ryancook4/DTC> (Python y R). Se contrastó
+`src/dtc.py` línea por línea contra esta implementación.
+
+| | referencia (`src/dtc.py`) | esta implementación |
+|---|---|---|
+| `A` | `np.zeros((V,V))`, densa `O(V²)` | hash map, `O(E)`, consultas `O(1)` |
+| `get_neighbors(u)` | `argwhere(A[u,:]>0)` + `argwhere(A[:,u]>0)`: **`O(V)`** | conjunto de vecinos: **`O(d(u))`** |
+| deduplicación de `these_k` | `set(...)` | marcas de época, `O(1)` por elemento |
+| arco redundante | `(A>1 and s==1) or (A>=1 and s==-1)` | `tie_before == tie_now`, equivalente |
+| `classify_triad` | CSV de 64 filas, bits `(ij,ik,jk,ji,ki,kj)` | tabla de 64, otra codificación de bits |
+| `D` | clave `"a-b-c"` → `"021D_3-7-5"` (motivo **etiquetado**) | clave canónica → `{motivo, nodos[3]}` |
+| baja de `D` | nunca borra; detecta desconectado por el nombre del motivo | borra cuando deja de ser conexa |
+| ledger | `(t, clave, motivo_prev, motivo_curr)` | igual, con motivo etiquetado |
+
+**Las dos erratas están confirmadas por el propio código del autor.** `src/dtc.py:107` hace
+`self.C[prev_main_motif] -= 1`, o sea **resta**, no suma como dice la Línea 12 publicada. Y
+`src/dtc.py:103` hace `self.D[this_key] = curr_motif_id` **antes e independientemente** del
+`if/else`, no dentro de la rama `prev_motif ≠ NULL` como aparece en la Línea 11. También su
+chequeo de arco redundante contempla los dos signos, cosa que la Línea 2 publicada no hace.
+O sea que el listado del paper tiene erratas de transcripción y el código real coincide con lo
+que se implementó acá.
+
+### La referencia no alcanza la complejidad que declara el paper
+
+`get_neighbors()` barre una fila y una columna enteras de la matriz densa:
+
+```python
+return np.concatenate( (np.argwhere( self.A[u, :]>0),
+                        (np.argwhere( self.A[:, u]>0))) ).reshape(-1)
+```
+
+Eso es `O(V)` por llamada, dos llamadas por evento. La Sección 5.1 del paper afirma que el
+acceso a vecinos es `O(1)` amortizado *"since nodes have canonical ordering and hashing"*, y
+de ahí deriva el `O(Δ̂)` por evento. La implementación publicada no hace eso.
+
+Medido, con 800 eventos aleatorios sobre un grafo casi vacío (grado medio 0,1), donde un
+algoritmo `O(Δ̂)` debería costar prácticamente lo mismo para cualquier `V`:
+
+| `V` | referencia (µs/evento) | esta implementación (µs/evento) |
+|---:|---:|---:|
+| 2 000 | 51,0 | 0,6 |
+| 4 000 | 89,0 | 0,5 |
+| 8 000 | 203,9 | 0,3 |
+| 16 000 | 626,0 | 0,3 |
+
+El costo de la referencia se multiplica por 12 al multiplicar `V` por 8; el de acá se mantiene
+plano. El factor constante entre Python y C++ no es lo relevante: lo que importa es la
+**forma** de la curva, lineal en `V` contra plana. Esto además explica una observación del
+propio paper (Apéndice F): que la ventaja de DTC sobre el baseline *disminuye* al pasar de
+`V = 1e2` a `V = 1e3`, algo que un algoritmo genuinamente `O(Δ̂)` no debería mostrar.
+
+A esto se suma que la matriz densa cuesta `O(V²)` de memoria: con `V = 16 000` son 2 GB en
+float64, lo que en la práctica pone el techo de tamaño mucho antes que el tiempo.
+
+### Validación cruzada contra la referencia
+
+```bash
+git clone https://github.com/ryancook4/DTC.git
+./comparar_referencia.py /ruta/a/DTC
+```
+
+Compara censo, contenido de `D` (incluido el motivo etiquetado, o sea qué nodo ocupa cada
+posición estructural) y censo con disolución parcial, reproduciendo en Python el mismo
+generador pseudoaleatorio del C++ para que los dos disuelvan exactamente los mismos arcos.
+
+Resultado: **15 de 15 comprobaciones OK** sobre 6nodos, 12nodos, social, elec y yeast. El
+contenido de `D` coincide entrada por entrada, con las mismas tríadas y el mismo orden de
+nodos etiquetado. Las dos tablas de clasificación (la CSV del autor y la de 64 entradas usada
+acá) se verificaron equivalentes en las **64** combinaciones binarias.
+
 ## Desviaciones deliberadas
 
 **Chequeo de arco redundante (Líneas 2-4).** El paper escribe `if A_{i,j} > 1 then return`,
 que es correcto para formación pero no para disolución: bajar el peso de 2 a 1 dejaría pasar
 el evento aunque el arco siga existiendo. Se usa la condición equivalente y simétrica: el
 censo cambia sólo si cambia la **existencia** del arco, no su peso. Es lo que argumenta la
-Sección 4.2.1, y para `s = +1` coincide exactamente con la línea publicada.
+Sección 4.2.1, y coincide con lo que hace el código del autor
+(`(A>1 and s==1) or (A>=1 and s==-1)`), que también contempla los dos signos.
 
 **Conectividad de la tríada.** Que `{i,j,k}` sea conexa depende de la díada **no dirigida**
 `i-j`, no del arco `i→j`. Si `j→i` ya existía, `i` y `j` ya eran vecinos y la tríada ya era
@@ -75,9 +150,12 @@ el modo `--no-dict` sea equivalente.
 listado. Falta el caso en que la tríada deja de ser conexa: hay que sacarla de `D` y devolver
 su conteo a 012 o 102. Está implementado y **validado** (ver abajo).
 
-**Almacenamiento de `A`.** El paper guarda la matriz densa en `O(V²)` (Apéndice A). Acá se
-usa un hash map: mismas consultas en `O(1)`, memoria `O(|E|)`. No cambia la complejidad
-declarada, sólo hace usables los grafos del repo.
+**Almacenamiento de `A` y acceso a vecinos.** El paper guarda la matriz densa en `O(V²)`
+(Apéndice A) y la referencia obtiene los vecinos barriendo fila y columna, lo que cuesta
+`O(V)`. Acá `A` es un hash map (consultas `O(1)`, memoria `O(E)`) y cada nodo tiene su
+conjunto de vecinos no dirigidos, con lo que `get_neighbors` cuesta `O(d(u))`. Es la única
+desviación que cambia el comportamiento asintótico, y es deliberada: es lo que hace falta
+para que se cumpla el `O(Δ̂)` por evento que el paper declara. Ver la comparación de arriba.
 
 ## Observación: `D` no hace falta para el censo
 
@@ -102,6 +180,7 @@ g++ -O2 -o dtc dtc.cpp
 ./dtc ../../data/social_procesado.txt                 # censo, modo fiel al paper
 ./dtc <grafo> --no-dict                               # sin D: mismo censo, mucho más liviano
 ./dtc <grafo> --ledger transiciones.txt               # volcar el ledger L
+./dtc <grafo> --volcar-D D.txt                        # volcar D con motivo etiquetado
 ./dtc <grafo> --disolver                              # formar todo y después disolver todo
 ./dtc <grafo> --disolver-parcial 7 remanente.txt      # disolver ~30 % y escribir el resto
 ```
