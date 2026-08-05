@@ -233,6 +233,65 @@ Dos conclusiones:
    está pensado para *event logs* donde el censo se consulta muchas veces a lo largo del
    tiempo, no para contar una vez sobre un grafo ya armado.
 
+## Comparación contra FC3R y Ortmann sobre el censo estático
+
+Los tres calculan el mismo censo y **coinciden en todos los grafos**: el censo de 16 tipos de
+DTC es idéntico al de `ortmann-00`, y el total de motivos conexos de FC3R-01 coincide con el
+de los otros dos. Lo que cambia es el tiempo.
+
+Tiempo de algoritmo, sin la lectura del archivo en ninguno de los tres (medianas de 3
+corridas; 1 corrida en los dos más lentos). DTC en modo `--no-dict`, que es su caso más
+favorable:
+
+| grafo | n | arcos | ortmann-00 | FC3R-01 | DTC | DTC / ortmann |
+|---|---:|---:|---:|---:|---:|---:|
+| 6nodos | 6 | 16 | 0,022 ms | < 0,01 ms | 0,006 ms | 0,3 × |
+| 12nodos | 12 | 34 | 0,027 ms | < 0,01 ms | 0,010 ms | 0,4 × |
+| social | 67 | 284 | 0,090 ms | < 0,01 ms | 0,120 ms | 1,3 × |
+| estrella_125 | 125 | 248 | 0,109 ms | < 0,01 ms | 0,372 ms | 3,4 × |
+| elec | 252 | 798 | 0,258 ms | < 0,01 ms | 0,208 ms | 0,8 × |
+| yeast | 688 | 2 156 | 0,571 ms | < 0,01 ms | 1,218 ms | 2,1 × |
+| Danio rerio | 13 773 | 51 920 | 12,3 ms | 2,0 ms | 5 798 ms | **473 ×** |
+| Rattus | 13 546 | 162 430 | 21,6 ms | 9,0 ms | 31 954 ms | **1 479 ×** |
+| Saccharomyces | 6 555 | 462 800 | 100,1 ms | 70,0 ms | 79 984 ms | **799 ×** |
+| C. elegans | 16 529 | 630 538 | 141,4 ms | 94,9 ms | 200 999 ms | **1 421 ×** |
+| Drosophila | 18 766 | 734 472 | 160,1 ms | 87,1 ms | > 600 000 ms | **> 3 700 ×** |
+
+**Esto no es un defecto de DTC ni de esta implementación: es su peor caso por construcción.**
+Reproducir un grafo estático como historia de eventos y mirar el resultado una sola vez es
+exactamente el escenario donde toda su contabilidad incremental es puro sobrecosto. DTC está
+diseñado para lo contrario: un *event log* donde el censo se consulta muchas veces a lo largo
+del tiempo y nunca se recalcula.
+
+Los contadores confirman que el costo es el que la complejidad predice, no algo cuadrático:
+en Rattus visita 261 M *connected thirds* en 162 430 eventos, o sea unos 1 600 por evento, a
+117 ns cada uno. El promedio de 1 600 (contra un grado medio de 12) es puro efecto de los
+hubs: el costo por evento es `O(d(i) + d(j))` y en estos grafos `d` está muy sesgado.
+
+### Dónde estaría el punto de equilibrio
+
+La pregunta correcta no es cuál gana en una foto, sino a partir de cuántas fotos conviene DTC.
+Recalcular estáticamente en `T` instantes cuesta `T ×` un censo estático; DTC cuesta el replay
+completo una sola vez. El cruce está en:
+
+| grafo | vs ortmann-00 | vs FC3R-01 |
+|---|---:|---:|
+| Danio rerio | 473 instantes | 2 899 instantes |
+| Saccharomyces | 799 | 1 143 |
+| C. elegans | 1 421 | 2 118 |
+| Rattus | 1 479 | 3 550 |
+
+O sea que en estos grafos hacen falta del orden de **500 a 3 500 instantes de tiempo** antes de
+que DTC compense. Por debajo de eso conviene recalcular con FC3R o con Ortmann. Es un número
+concreto y defendible para el paper: delimita el terreno de cada enfoque sin descalificar a
+ninguno.
+
+Una salvedad honesta: esta implementación de DTC no está optimizada. Cada *third* hace del
+orden de diez consultas al hash map de `A` (conectividad, clasificación y el chequeo de
+mutualidad), y reusando valores se podrían recortar a la mitad. Un factor 2 de mejora no
+cambiaría ninguna de las conclusiones de arriba, pero conviene no leer los 473-1 479 × como si
+todo fuera intrínseco al algoritmo.
+
 ## Complejidad
 
 El paper declara `O(Δ̂)` por evento y `O(Δ̂·T·h(t))` sobre la historia completa (Sección 5),
