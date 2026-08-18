@@ -391,7 +391,8 @@ int main() {
 	ReadGraph("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
 //	printNodes();
 //	getchar();
-    time_t inicio = time(NULL);
+    struct timespec inicio, fin;
+    clock_gettime(CLOCK_MONOTONIC, &inicio);
     qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeDescendente);
 	UpdatePos();
 	Make_Graph();
@@ -402,8 +403,8 @@ int main() {
 	
 //	SearchGraphletsDriver();
 //	print_types();
-	time_t fin = time(NULL);
-	double tiempo_transcurrido = difftime(fin, inicio);
+	clock_gettime(CLOCK_MONOTONIC, &fin);
+	double tiempo_transcurrido = (fin.tv_sec - inicio.tv_sec) + (fin.tv_nsec - inicio.tv_nsec) / 1e9;
 	print_types();
 	printf("touchNodes:%llu, procesedNodes:%llu tiempo_transcurrido:%f\n",touchNodes,procesedNodes,tiempo_transcurrido);
 

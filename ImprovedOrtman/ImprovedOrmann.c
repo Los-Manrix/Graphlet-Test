@@ -124,13 +124,15 @@ void ReadGraph(const char* filename) {
 		edge[i][1] = dest-1; //target
 		edge[i][2] = t; //type
 
-		if (t == 1)
-			Nodes[ori-1][0]++;//n1
-		else
-			if (t == 2)		
-				Nodes[ori-1][1]++;//n2
+		if (ori != dest) {//un self-loop no es un vecino
+			if (t == 1)
+				Nodes[ori-1][0]++;//n1
 			else
-				Nodes[ori-1][2]++;//n3,grade
+				if (t == 2)
+					Nodes[ori-1][1]++;//n2
+				else
+					Nodes[ori-1][2]++;//n3,grade
+		}
 		order[ori-1].id = ori-1;
         order[ori-1].grade++;
         Nodes[ori-1][4]++;//grade
@@ -306,7 +308,8 @@ int main() {
 	ReadGraph("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
 //	printNodes();
 //	getchar();
-    time_t inicio = time(NULL);
+    struct timespec inicio, fin;
+    clock_gettime(CLOCK_MONOTONIC, &inicio);
     qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeAscendente);
 	UpdatePos();
 	Make_Graph();
@@ -317,8 +320,8 @@ int main() {
 	
 //	SearchGraphletsDriver();
 //	print_types();
-	time_t fin = time(NULL);
-	double tiempo_transcurrido = difftime(fin, inicio);
+	clock_gettime(CLOCK_MONOTONIC, &fin);
+	double tiempo_transcurrido = (fin.tv_sec - inicio.tv_sec) + (fin.tv_nsec - inicio.tv_nsec) / 1e9;
 	print_types();
 	printf("touchNodes:%llu, procesedNodes:%llu tiempo_transcurrido:%f\n",touchNodes,procesedNodes,tiempo_transcurrido);
 
