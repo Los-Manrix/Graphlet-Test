@@ -4,9 +4,9 @@
 #include <time.h>
 
 // Define limits based on your large dataset
-#define MAX_VERTICES 100005
+#define MAX_VERTICES 2500005
 #define MAX_EDGES    25000005  // Total directed edges (multiply by 2 for bidirectional)
-#define MAX_NEI 50000
+#define MAX_NEI 200005
 int num_nodes,num_edges;
 
 // Array-based Adjacency List Structure
@@ -120,6 +120,7 @@ void ReadGraph(const char* filename) {
 	for (i = 0; i < num_edges; i++) {
 		fscanf(f, "%d %d %d\n", &ori, &dest, &t);
 		//addDirectedEdge(ori-1, dest-1, t);
+		if (ori < 1 || dest < 1 || ori > num_nodes || dest > num_nodes) continue;//id fuera de rango
 		edge[i][0] = ori-1; //source
 		edge[i][1] = dest-1; //target
 		edge[i][2] = t; //type
@@ -245,7 +246,7 @@ void updateTotalGraphlets(int x, int y, int z, int c){
 }
 void SearchGraphlets_3(int u){
 	int i,j;
-	int q[MAX_NEI];
+	static int q[MAX_NEI];
 	int nq = 0;
 
 	for (i = Gini[u];i < Gini[u]+Ggrade[u];i++){
@@ -297,15 +298,20 @@ void SearchGraphletsDriver(){
 	}
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     int i,e;
+
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <archivo_grafo>\n", argv[0]);
+        return 1;
+    }
 
 
     // Build the graph using array indexes
     initialize_type();
 
 //	ReadGraph("./Benchmarks/outs/TCGA-BRCA_elbow_GRN_procesado.txt");
-	ReadGraph("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
+	ReadGraph(argv[1]);
 //	printNodes();
 //	getchar();
     struct timespec inicio, fin;
