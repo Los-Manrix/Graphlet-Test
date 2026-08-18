@@ -224,7 +224,7 @@ void print_types(){
 	for(i = 0;i < 4;i++)
 		for(j = 0;j < 4;j++)
 			for(k = 0;k < 4;k++)
-				printf("[%d][%d][%d] : %llu\n",i,j,k,type[i][j][k]);
+				printf("[%d][%d][%d] : %lld\n",i,j,k,type[i][j][k]);
 }
 
 long long comb2(int n) {

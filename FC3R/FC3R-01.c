@@ -12,9 +12,18 @@
 #include <time.h>
 
 // Define limits based on your large dataset
-#define MAX_VERTICES 100005
+// Topes ampliados para admitir WikiTalk (n = 2 394 385, grado maximo 100 029).
+// Los arrays de abajo son BSS: las paginas que no se tocan nunca se residencian,
+// asi que subir estos topes no cuesta memoria en los grafos chicos ni agrega
+// trabajo, porque ningun recorrido va hasta el tope sino hasta num_nodes.
+#define MAX_VERTICES 2500005
 #define MAX_EDGES    25000005  // Total directed edges (multiply by 2 for bidirectional)
-#define MAX_NEI 50000
+#define MAX_NEI      200005
+
+// Traza de depuracion por hub, apagada por defecto (ver SearchGraphletsDriver)
+#ifndef VERBOSE_HUBS
+#define VERBOSE_HUBS 0
+#endif
 int num_nodes,num_edges;
 
 // Array-based Adjacency List Structure
@@ -171,6 +180,14 @@ void ReadGraph(const char* filename) {
 	}
 	fscanf(f, "%d %d", &num_nodes, &num_edges);
 	fscanf(f, "\n");
+	if (num_nodes > MAX_VERTICES) {
+		fprintf(stderr, "n = %d supera MAX_VERTICES (%d)\n", num_nodes, MAX_VERTICES);
+		exit(1);
+	}
+	if (num_edges > MAX_EDGES) {
+		fprintf(stderr, "m = %d supera MAX_EDGES (%d)\n", num_edges, MAX_EDGES);
+		exit(1);
+	}
     initGraph(num_nodes);
 
     long data_start = ftell(f);
@@ -179,6 +196,12 @@ void ReadGraph(const char* filename) {
     for (i = 0; i < num_edges; i++) {
         fscanf(f, "%d %d %d\n", &ori, &dest, &t);
         ori--; dest--;
+        // Se descartan los arcos con un extremo fuera de rango, igual que hace
+        // el lector de Ortmann, para que ambos programas procesen exactamente
+        // el mismo grafo. WikiTalk trae 6 lineas con el id 0, que es invalido
+        // en un formato base 1; sin este chequeo se escribe fuera de los
+        // arrays (nodes[-1], order[-1]) y el programa termina en segfault.
+        if (ori < 0 || dest < 0 || ori >= num_nodes || dest >= num_nodes) continue;
         adj_start[ori + 1]++;
         order[ori].grade++;
         nodes[ori].grade++;
@@ -193,15 +216,18 @@ void ReadGraph(const char* filename) {
     for (i = 0; i < num_nodes; i++) fill[i] = adj_start[i];
 
     fseek(f, data_start, SEEK_SET);
+    int almacenados = 0;
     for (i = 0; i < num_edges; i++) {
         fscanf(f, "%d %d %d\n", &ori, &dest, &t);
         ori--; dest--;
+        if (ori < 0 || dest < 0 || ori >= num_nodes || dest >= num_nodes) continue;
         int idx = fill[ori]++;
         toEdge[idx]     = dest;
         toEdgeType[idx] = t;
+        almacenados++;
     }
     free(fill);
-    edgeCount = num_edges;
+    edgeCount = almacenados;
 
 	fclose(f);
 }
@@ -228,12 +254,19 @@ int compararSucesorPorGrado(const void *a, const void *b) {
 // rango del CSR (toEdge/toEdgeType) por el grado del destino, ascendente.
 // Se llama una sola vez, después de ReadGraph y antes de buscar los motivos.
 void OrdenarSucesoresPorGrado() {
-    Sucesor buf[MAX_NEI];
+    // static: con MAX_NEI ampliado son ~1.6 MB, demasiado para la pila.
+    // La funcion no es recursiva, asi que static no cambia la semantica.
+    static Sucesor buf[MAX_NEI];
     int u, k, cantidad;
 
     for (u = 0; u < num_nodes; u++) {
         cantidad = adj_start[u + 1] - adj_start[u];
         if (cantidad < 2) continue;
+        if (cantidad > MAX_NEI) {
+            fprintf(stderr, "Grado del nodo %d (%d) supera MAX_NEI (%d)\n",
+                    u + 1, cantidad, MAX_NEI);
+            exit(1);
+        }
 
         for (k = 0; k < cantidad; k++) {
             int e = adj_start[u] + k;
@@ -267,7 +300,7 @@ void print_types(){
 	for(i = 0;i < 4;i++)
 		for(j = 0;j < 4;j++)
 			for(k = 0;k < 4;k++)
-				printf("[%d][%d][%d] : %llu\n",i,j,k,type[i][j][k]);
+				printf("[%d][%d][%d] : %lld\n",i,j,k,type[i][j][k]);
 }
 
 long long comb2(int n) {
@@ -280,7 +313,9 @@ long long unsigned procesedNodes = 0;
 void SearchGraphlets(int i, int iter){
 	int e, s = nodes[i].id;
 	int n1 = 0, n2 = 0, n3 = 0;
-	int q[MAX_NEI];
+	// static por el mismo motivo que buf[] en OrdenarSucesoresPorGrado:
+	// con MAX_NEI ampliado no entra en la pila. No hay recursion.
+	static int q[MAX_NEI];
 	int nq = 0;
 
 	nodes[s].color = 0;
@@ -357,9 +392,16 @@ void SearchGraphletsDriver(){
 		int k = order[i].id;
 
 		if(nodes[k].color){
+			// Traza de depuracion: dos lineas por hub. En WikiTalk son hasta
+			// 4,8 M de printf dentro de la region cronometrada, asi que queda
+			// apagada por defecto. Compilar con -DVERBOSE_HUBS=1 para verla.
+#if VERBOSE_HUBS
 			printf("(%d) ENTRA %d: nsuccs:%d \n",i, nodes[k].id,nodes[k].grade);
+#endif
 			SearchGraphlets(k, iter);
+#if VERBOSE_HUBS
 			printf("touchNodes:%llu, procesedNodes:%llu\n",touchNodes,procesedNodes);
+#endif
 			//getchar();
 		}
 
