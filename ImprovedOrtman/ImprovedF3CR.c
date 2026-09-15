@@ -110,36 +110,51 @@ void printNeighbors(int u) {
 
 void ReadGraph(const char* filename) {
 	FILE* f;
-	int i, ori, dest, dist, t;
+	int i, ori, dest, t;
 	f = fopen(filename, "r");
 	if (f == NULL) 	{
 		printf("Cannot open file %s.\n", filename);
-	//	exit(1);
+		exit(1);
 	}
 	fscanf(f, "%d %d", &num_nodes, &num_edges);
 	fscanf(f, "\n");
-//	printf("%d %d %d\n", num_gnodes, num_arcs,INT_MAX);
-//	getchar();
     initGraph(num_nodes);
+
+    long data_start = ftell(f);
+
+    // Detectar si el grafo es base 0 o base 1
+    int shift = 1;
+    for (i = 0; i < num_edges; i++) {
+        if (fscanf(f, "%d %d %d\n", &ori, &dest, &t) != 3) break;
+        if (ori == 0 || dest == 0) {
+            shift = 0;
+            break;
+        }
+    }
+
+    fseek(f, data_start, SEEK_SET);
+
 	for (i = 0; i < num_edges; i++) {
-		fscanf(f, "%d %d %d\n", &ori, &dest, &t);
-		//addDirectedEdge(ori-1, dest-1, t);
-		edge[i][0] = ori-1; //source
-		edge[i][1] = dest-1; //target
+		if (fscanf(f, "%d %d %d\n", &ori, &dest, &t) != 3) break;
+		if (ori < shift || dest < shift || ori > num_nodes - (1 - shift) || dest > num_nodes - (1 - shift)) continue;
+
+		int u = ori - shift;
+		int v = dest - shift;
+
+		edge[i][0] = u; //source
+		edge[i][1] = v; //target
 		edge[i][2] = t; //type
 
 		if (t == 1)
-			Nodes[ori-1][0]++;//n1
+			Nodes[u][0]++;//n1
 		else
 			if (t == 2)		
-				Nodes[ori-1][1]++;//n2
+				Nodes[u][1]++;//n2
 			else
-				Nodes[ori-1][2]++;//n3,grade
-		order[ori-1].id = ori-1;
-        order[ori-1].grade++;
-        Nodes[ori-1][4]++;//grade
-
-	//	printf("%d %d %d\n", ori-1, dest-1, t);
+				Nodes[u][2]++;//n3,grade
+		order[u].id = u;
+        order[u].grade++;
+        Nodes[u][4]++;//grade
 	}
 	fclose(f);
 }
@@ -187,10 +202,14 @@ void initialize_type(){
 
 void print_types(){
 	int i,j,k;
+	long long total = 0;
 	for(i = 0;i < 4;i++)
 		for(j = 0;j < 4;j++)
-			for(k = 0;k < 4;k++)
+			for(k = 0;k < 4;k++) {
 				printf("[%d][%d][%d] : %lld\n",i,j,k,type[i][j][k]);
+				total += type[i][j][k];
+			}
+	printf("Total subgrafos conexos de 3 nodos: %lld\n", total);
 }
 
 long long comb2(int n) {
@@ -380,15 +399,18 @@ void SearchGraphletsDriver(){
 	}
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     int i,e;
 
 
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <archivo_grafo>\n", argv[0]);
+        return 1;
+    }
+
     // Build the graph using array indexes
     initialize_type();
-//	ReadGraph("./Benchmarks/outs/7nodos_procesado.txt");
-//	ReadGraph("./Benchmarks/outs/TFLink_Drosophila_melanogaster_interactions_LS_simpleFormat_v1.0_procesado.txt");
-	ReadGraph("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
+    ReadGraph(argv[1]);
 //	printNodes();
 //	getchar();
     struct timespec inicio, fin;
