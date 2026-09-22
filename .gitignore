@@ -2,3 +2,23 @@
 *.md
 !README.md
 !resultados*.md
+
+# Binarios y compilados C/C++
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+benchmark_c
+test_lectura
+main
+a.out
+fc3r*
+FCYV-*cpp
+
+# Logs y temporales
+*.log
+scratch/
+FormatoP.7z
+FormatoP/
