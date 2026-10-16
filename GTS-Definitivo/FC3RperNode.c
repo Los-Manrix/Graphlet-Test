@@ -1,11 +1,12 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 
 // Define limits based on your large dataset
-#define MAX_VERTICES 100005
-#define MAX_EDGES    25000005  // Total directed edges (multiply by 2 for bidirectional)
+#define MAX_VERTICES 2500005
+#define MAX_EDGES    55000005  // Total directed edges (multiply by 2 for bidirectional)
 #define MAX_NEI 50000
 int num_nodes,num_edges;
 
@@ -47,25 +48,25 @@ struct toSort //nodes
   unsigned grade; 
 };
 
-// Funci髇 de comparaci髇 segura para tipos unsigned (Mayor a Menor)
+// Funci贸n de comparaci贸n segura para tipos unsigned (Mayor a Menor)
 int compararPorGradeDescendente(const void *a, const void *b) {
-    // 1. Convertir los punteros gen閞icos al tipo de tu estructura
+    // 1. Convertir los punteros gen茅ricos al tipo de tu estructura
     const struct toSort *nodoA = (const struct toSort *)a;
     const struct toSort *nodoB = (const struct toSort *)b;
 
-    // 2. L骻ica para orden descendente (Mayor a Menor)
-    if (nodoA->grade < nodoB->grade) return 1;  // Si A es menor, va despu閟
+    // 2. L贸gica para orden descendente (Mayor a Menor)
+    if (nodoA->grade < nodoB->grade) return 1;  // Si A es menor, va despu茅s
     if (nodoA->grade > nodoB->grade) return -1; // Si A es mayor, va antes
     return 0;                                   // Si son iguales, se quedan igual
 }
 
 int compararPorGradeAscendente(const void *a, const void *b) {
-    // 1. Convertir los punteros gen閞icos al tipo de tu estructura
+    // 1. Convertir los punteros gen茅ricos al tipo de tu estructura
     const struct toSort *nodoA = (const struct toSort *)a;
     const struct toSort *nodoB = (const struct toSort *)b;
 
-    // 2. L骻ica para orden descendente (Mayor a Menor)
-    if (nodoA->grade > nodoB->grade) return 1;  // Si A es menor, va despu閟
+    // 2. L贸gica para orden descendente (Mayor a Menor)
+    if (nodoA->grade > nodoB->grade) return 1;  // Si A es menor, va despu茅s
     if (nodoA->grade < nodoB->grade) return -1; // Si A es mayor, va antes
     return 0;                                   // Si son iguales, se quedan igual
 }
@@ -141,36 +142,55 @@ int GraphletType(int c){
 long long int truenum_edges = 0;
 void ReadEdges(const char* filename) {
 	FILE* f;
-	int i, ori, dest, dist, t;
+	int i, ori, dest, t;
 	f = fopen(filename, "r");
 	if (f == NULL) 	{
 		printf("Cannot open file %s.\n", filename);
-	//	exit(1);
+		exit(1);
 	}
-	fscanf(f, "%d %d", &num_nodes, &num_edges);
+	if (fscanf(f, "%d %d", &num_nodes, &num_edges) != 2) {
+		printf("Error reading header N M from %s.\n", filename);
+		exit(1);
+	}
 	fscanf(f, "\n");
     initGraph(num_nodes);
+
+    long data_start = ftell(f);
+
+    // Auto-detecci贸n din谩mica de Base 0 vs Base 1 para evitar Core Dumped
+    int shift = 1;
+    for (i = 0; i < num_edges; i++) {
+        if (fscanf(f, "%d %d %d\n", &ori, &dest, &t) != 3) break;
+        if (ori == 0 || dest == 0) {
+            shift = 0;
+            break;
+        }
+    }
+    fseek(f, data_start, SEEK_SET);
+
 	for (i = 0; i < num_edges; i++) {
-		fscanf(f, "%d %d %d\n", &ori, &dest, &t);
+		if (fscanf(f, "%d %d %d\n", &ori, &dest, &t) != 3) break;
 		if (ori != dest){
-			edge[truenum_edges][0] = ori-1; //source
-			edge[truenum_edges][1] = dest-1; //target
+			int u = ori - shift;
+			int v = dest - shift;
+			if (u < 0 || v < 0 || u >= num_nodes || v >= num_nodes) continue;
+
+			edge[truenum_edges][0] = u; //source
+			edge[truenum_edges][1] = v; //target
 			edge[truenum_edges][2] = t; //type
 
 			if (t == 1)
-				Nodes[ori-1][0]++;//n1
+				Nodes[u][0]++;//n1
 			else
 				if (t == 2)		
-					Nodes[ori-1][1]++;//n2
+					Nodes[u][1]++;//n2
 				else
-					Nodes[ori-1][2]++;//n3,grade
-			order[ori-1].id = ori-1;
-        	order[ori-1].grade++;
-        	Nodes[ori-1][4]++;//grade
+					Nodes[u][2]++;//n3,grade
+			order[u].id = u;
+        	order[u].grade++;
+        	Nodes[u][4]++;//grade
 			truenum_edges++;
 		}
-
-	//	printf("%d %d %d\n", ori-1, dest-1, t);
 	}
 	fclose(f);
 }
@@ -403,9 +423,11 @@ void SearchGraphletsTotal2(){
 	return;
 }
 
+
+
+
 void SearchGraphletsTotalPerNode(){
 	int i,j,k,u,n;
-	long long int ntriagles = 0;
 	
 	
 	long long int type[64];
@@ -487,26 +509,179 @@ void SearchGraphletsTotalPerNode(){
 }
 
 
+unsigned int**  SearchGraphletsTotalPerNode2(){
+	int i,u,v,t,j,k,n;
 
-int main() {
-    int i,e;
-	struct timeval tstart, tend;
-
-	ReadEdges("./Benchmarks/outs/TFLink_Homo_sapiens_interactions_LS_simpleFormat_v1.0.tsv_procesado.txt");
-    gettimeofday(&tstart, NULL);
-    qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeAscendente);
-    //qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeDescendente);
 	
-	UpdatePos();
+//	unsigned int TypePerNode2[MAX_VERTICES][14];
+
+	unsigned int** TypePerNode2 = (unsigned int**) malloc(MAX_VERTICES * sizeof(unsigned int*));
+	for (i = 0; i < num_nodes; i++)
+		TypePerNode2[i] = (unsigned int*) malloc(14 * sizeof(unsigned int));
+
+	for (i = 0; i < num_nodes; i++)
+		for (j=0; j<14; j++) 
+			TypePerNode2[i][j] = 0;
+	
+	for (i = 0; i < truenum_edges; i++) {
+		u = edge[i][0];
+		v = edge[i][1];
+		t = edge[i][2];
+
+		if (t == 1)
+			for (k = 1; k < 4; k++){
+				n = (1 * 16) + (0 * 4) + k;
+				j = GraphletType(n);
+				if(k == 1)
+					TypePerNode2[v][j] += Nodes[u][k-1]-1;
+				else 
+					TypePerNode2[v][j] += Nodes[u][k-1];
+			}
+		else 
+			if (t == 2)
+				for (k = 1; k < 4; k++){
+					n = (2 * 16) + (0 * 4) + k;
+					j = GraphletType(n);
+					if(k == 2)
+						TypePerNode2[v][j] += Nodes[u][k-1]-1;
+					else 
+						TypePerNode2[v][j] += Nodes[u][k-1];
+				}
+			else 
+				if (t == 3)
+					for (k = 1; k < 4; k++){
+						n = (3 * 16) + (0 * 4) + k;
+						j = GraphletType(n);
+						if(k == 3)
+							TypePerNode2[v][j] += Nodes[u][k-1]-1;
+						else 
+							TypePerNode2[v][j] += Nodes[u][k-1];
+					}
+		int posu = Nodes[u][3];
+		int posv = Nodes[v][3];
+		if (posv > posu){
+			addDirectedEdge(u,v,t);
+			edgeCount++;
+		}
+	}
+    
+
+
+	for (k = 0; k < num_nodes; k++) {
+		u =  order[k].id;	
+		int n1 = Nodes[u][0];
+		int n2 = Nodes[u][1];
+		int n3 = Nodes[u][2];
+		n= (1 * 16) + (0 * 4) + 1;j = GraphletType(n);
+		TypePerNode2[u][j] += comb2(n1);
+		n= (2 * 16) + (0 * 4) + 2;j = GraphletType(n);
+		TypePerNode2[u][j] += comb2(n2);
+		n= (3 * 16) + (0 * 4) + 3;j = GraphletType(n);
+		TypePerNode2[u][j] += comb2(n3);
+		n= (1 * 16) + (0 * 4) + 2;j = GraphletType(n);
+		TypePerNode2[u][j] += n1 * n2;
+		n= (1 * 16) + (0 * 4) + 3;j = GraphletType(n);
+		TypePerNode2[u][j] += n1 * n3;
+		n= (2 * 16) + (0 * 4) + 3;j = GraphletType(n);
+		TypePerNode2[u][j] += n2 * n3;
 		
-	//Make_Graph();SearchGraphletsTotal();
+		
+		for (i = Gini[u];i < Gini[u]+Ggrade[u];i++){
+			int v = G[i];
+			Gtuv[v] = Gtype[i]; //type from u to v		
+			Gp[v] = u;
+			touchNodes;
+		}
+
+		for (i = Gini[u];i < Gini[u]+Ggrade[u];i++){
+			int v = G[i];
+			for (j = Gini[v];j < Gini[v]+Ggrade[v];j++){
+				int w = G[j];
+				touchNodes++;
+				if (Gp[v] == Gp[w]){ //Triangle detected
+					short x = Gtuv[v];
+					short y = Gtype[j];
+					short z = Gtuv[w];
+					short a1 = (x * 16) + (y * 4) + z;
+					short a2 = (x * 16) + (0 * 4) + z;
+					short a3 = (inv(x) * 16) + (0 * 4) + y;
+					short a4 = (inv(z) * 16) + (0 * 4) + inv(y);
+
+					short i1 = GraphletType(a1);
+					short i2 = GraphletType(a2);
+					short i3 = GraphletType(a3);
+					short i4 = GraphletType(a4);
+					
+					ntriagles++;					
+					TypePerNode2[u][i1]++;
+					TypePerNode2[v][i1]++;
+					TypePerNode2[w][i1]++;
+										
+					TypePerNode2[u][i2]--;
+					TypePerNode2[v][i2]--;
+					TypePerNode2[w][i2]--;
+					
+					TypePerNode2[v][i3]--;
+					TypePerNode2[u][i3]--;
+					TypePerNode2[w][i3]--;					
+					
+					
+					TypePerNode2[w][i4]--;
+					TypePerNode2[v][i4]--;
+					TypePerNode2[u][i4]--;
+					
+					
+															
+				}
+			}
+		}
+	}
+		
+	return TypePerNode2;
+}
+
+
+
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Uso: %s <ruta_grafo> [version: 1 o 2 (default 2)] [orden: asc o desc (default asc)]\n", argv[0]);
+        return 1;
+    }
+
+    const char* filename = argv[1];
+    int modo = 2;
+    if (argc >= 3) {
+        modo = atoi(argv[2]);
+        if (modo != 1 && modo != 2) modo = 2;
+    }
+
+    struct timeval tstart, tend;
+
+    ReadEdges(filename);
+
+    gettimeofday(&tstart, NULL);
+
+    if (argc >= 4 && strcmp(argv[3], "desc") == 0) {
+        qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeDescendente);
+    } else {
+        qsort(order, num_nodes, sizeof(struct toSort), compararPorGradeAscendente);
+    }
 	
-	InitializeGraphletsperNode(); Make_Graph_Node();SearchGraphletsTotalPerNode();
-	//printGraphletsperNode();
+    UpdatePos();
+
+    if (modo == 1) {
+        InitializeGraphletsperNode();
+        Make_Graph_Node();
+        SearchGraphletsTotalPerNode();
+    } else {
+        SearchGraphletsTotalPerNode2();
+    }
 	
-	gettimeofday(&tend, NULL);
+    gettimeofday(&tend, NULL);
+
     double tiempo_transcurrido = 1.0 * (tend.tv_sec - tstart.tv_sec) + 1.0 * (tend.tv_usec - tstart.tv_usec) / 1000000.0;
-	printf("touchNodes:%llu, ntriagles:%llu tiempo_transcurrido:%f\n",touchNodes,ntriagles,tiempo_transcurrido);
+    printf("touchNodes:%llu, ntriagles:%llu tiempo_transcurrido:%f\n", touchNodes, ntriagles, tiempo_transcurrido);
 	
     return 0;
 }
